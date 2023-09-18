@@ -1,0 +1,52 @@
+import sympy as sp
+import numpy as np
+
+def main():
+    
+    
+    x1 = sp.Symbol('x1')
+    x2 = sp.Symbol('x2')
+    t = sp.Symbol('t')
+    b = sp.Symbol('b')
+    g = sp.Symbol('g')
+    u = sp.Symbol('u')
+    c1 = sp.Symbol('c1')
+    c2 = sp.Symbol('c2')
+    Ft = sp.Symbol('Ft')
+    Tf = sp.Symbol('Tf')
+    h = sp.Symbol('h')
+
+    
+    #first need to solve for c1_t0, c1_tf, c2_t0, c2_tf
+    x2eqn = x2 - (-(g -u)/b + c1*sp.exp(-t))
+    x1eqn = x1 - (-(g-u)/b * t   - c1*sp.exp(-t)  + c2)
+    x2eqn_t0 = x2eqn.subs([(u , 0),     (t, 0),     (x1 , h),(x2 , 0)])
+    x2eqn_tf = x2eqn.subs([(u , Ft),    (t, Tf),    (x1, 0),(x2 , 0)])
+    x1eqn_t0 = x1eqn.subs([(u , 0),     (t, 0),     (x1 , h),(x2 , 0)])
+    x1eqn_tf = x1eqn.subs([(u , Ft),    (t, Tf),    (x1 , 0),(x2 , 0)])
+       
+    #solve to the coefficients
+    c1_t0 = sp.solvers.solve(x2eqn_t0, c1)
+    c1_tf = sp.solvers.solve(x2eqn_tf, c1)
+    
+    x1eqn_t0 = x1eqn_t0.subs(c1,c1_t0[0])
+    x1eqn_tf = x1eqn_tf.subs(c1,c1_tf[0])
+    
+    c2_t0 = sp.solvers.solve(x1eqn_t0, c2)
+    c2_tf = sp.solvers.solve(x1eqn_tf, c2)
+    
+    x1eqn_t0 = x1eqn_t0.subs(c2,c2_t0)
+    x1eqn_tf = x1eqn_tf.subs(c2,c2_tf)
+    
+    
+    #now i have the 4 equations, just need to set them equal to each other at t = tm
+    #and solve for tm, Tf as functions of the other variables.
+
+    
+    print(c2_t0)
+    
+
+
+if __name__ == "__main__":
+    
+    main()
