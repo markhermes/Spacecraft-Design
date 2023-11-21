@@ -1,0 +1,132 @@
+% Medium satellite	1,201 to 2,500 kg
+% Small satellite	601 to 1,200 kg
+% 
+try close(v);
+catch
+end
+
+clear all;
+
+%% Create inertia matrix for cylinder -- dimensions of ISS 
+% solid cylinder - Izz = 1/2 mr^2, Ixx = Iyy = 1/12(3r^2 + h^2)
+% assume a medium satellite has dims of 1m by 0.2m
+sat_m = 6e2;
+sat_r = 0.2;
+sat_l = 1;
+Izz = 0.5 * sat_m * sat_r^2;
+Ixx = 1/12 * sat_m * (3*sat_r^2 + sat_l^2);
+Iyy = Ixx;
+Ib = diag([Ixx, Iyy, Izz]);
+Ib_inv = inv(Ib);
+
+%% Run the coarse control 
+
+% F = G m1 m2/r^2 , G m1 = ge, F = ge m2 / r^2
+ge = 398600.8; % Earth gravitational constant [km3/s2]
+
+%
+orbital_body_mass   = 420e3;        %kg
+earth_mass          = 5.9722e24;    %kg
+
+% two inertial coord frames from TLE - ECI, TEME - True Equator Mean
+% Equinox -- z axis is celestial ephemeris pole
+% r is km, v = km/s
+r_orbital_body   = [5.097299027407659e+03;3.155106125548773e+03;-3.209936007009090e+03]; %r_teme
+v_orbital_body   = [-0.655709206595218;5.930726505531845;4.795677215184148]; %v_teme
+
+% simulate the angular and translational dynamics
+DT      = 0.1;
+q0      = Quaternion_fromEulerAngle_YPR_NED([0, 0 , 0])';
+wb0     = [0 0 0];   % initial z- spin
+tspan   = [0 200]; % orbital period is 90 mins
+ic      = [r_orbital_body ; v_orbital_body ; q0'; wb0'];
+opts    = odeset('MaxStep',DT);
+[t_coarse,y]   = ode45(@(t,x) orbital_sim_with_coarse_control(t,x,ge,Ib,Ib_inv,DT),tspan,ic,opts);
+
+coarse_r_orbital_body  = y(:,1:3);
+coarse_v_orbital_body  = y(:,4:6);
+coarse_q_body          = y(:,7:10);
+coarse_w_body          = y(:,11:13);
+
+trans   = coarse_r_orbital_body/(1.5*max(max(coarse_r_orbital_body)));
+vel     = coarse_v_orbital_body/(1.5*max(max(coarse_r_orbital_body)));
+q_fsn   = get_fsn(trans, vel);
+[coarse_err,coarse_tau]     = get_coarse_control_torques(q_fsn,coarse_q_body,coarse_w_body,Ib,DT);
+
+
+%% Run the fine control using coarse control as inputs
+
+ic = [  coarse_r_orbital_body(end,:)' ; ...
+        coarse_v_orbital_body(end,:)' ;...
+        coarse_q_body(end,:)';...
+        coarse_w_body(end,:)';...
+        zeros(3,1)];
+
+tspan   = [0 8000]; % orbital period is 90 mins
+[t_fine,y]   = ode45(@(t,x) orbital_sim_with_fine_control(t,x,ge,Ib,Ib_inv,DT),tspan,ic,opts);
+
+fine_r_orbital_body  = y(:,1:3);
+fine_v_orbital_body  = y(:,4:6);
+fine_q_body          = y(:,7:10);
+fine_w_body          = y(:,11:13);
+
+trans   = fine_r_orbital_body/(1.5*max(max(fine_r_orbital_body)));
+vel     = fine_v_orbital_body/(1.5*max(max(fine_r_orbital_body)));
+q_fsn   = get_fsn(trans, vel);
+[fine_err,fine_tau]     = get_fine_control_torques(q_fsn,fine_q_body,fine_w_body,Ib,DT,y(:,14));
+
+
+%% Normalize the translation values for the sim
+
+t               = [t_coarse; t_coarse(end)+t_fine];
+
+r_orbital_body  = [coarse_r_orbital_body ; fine_r_orbital_body];
+v_orbital_body  = [coarse_v_orbital_body;fine_v_orbital_body];
+q_body          = [coarse_q_body;fine_q_body];
+w_body          = [coarse_w_body;fine_w_body];
+
+err             = [coarse_err;fine_err];
+tau             = [coarse_tau;fine_tau];
+
+trans   = r_orbital_body/(1.5*max(max(r_orbital_body)));
+vel     = v_orbital_body/(1.5*max(max(r_orbital_body)));
+
+%% plot the torques and the angular error
+% get the setpoint
+
+plot_torques_and_errors;
+
+%% run movie
+v = VideoWriter('orbit_with_control.mp4','MPEG-4');
+v.set('FrameRate',30,'Quality',100)
+open(v);
+
+time_vect = 40:14:4000;
+time_vect = [time_vect 4000 : 134 : (length(t)/2)];
+% for i = 2:(10*60):length(t)
+for i = time_vect;
+
+    % plot spacecraft
+    plot_space_craft(q_body(i,:),trans(i,:));
+
+    % plot orbit
+    plot3(trans(:,1),trans(:,2),trans(:,3),'-r'); hold on;
+
+    % plot primary body
+    plot_earth;
+
+    % plot ascending and descending nodes
+    plot_nodes(trans);
+
+    % plot ForwardStarboardNadir
+    plot_fsn(trans(i,:),vel(i,:));
+
+    % plot Control-Related Vectors
+    plot_control_vect(trans(i,:),vel(i,:),q_body(i,:),w_body(i,:),Ib,DT)
+
+    pause(0.01);
+
+    writeVideo(v,getframe(gcf));
+
+end
+close(v);
